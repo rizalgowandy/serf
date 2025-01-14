@@ -1,6 +1,13 @@
-# Serf [![CircleCI](https://circleci.com/gh/hashicorp/serf.svg?style=svg)](https://circleci.com/gh/hashicorp/serf) [![Join the chat at https://gitter.im/hashicorp-serf/Lobby](https://badges.gitter.im/hashicorp-serf/Lobby.svg)](https://gitter.im/hashicorp-serf/Lobby?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
+# Serf [![Build Status](https://github.com/hashicorp/serf/workflows/Checks/badge.svg)](https://github.com/hashicorp/serf/actions) [![Join the chat at https://gitter.im/hashicorp-serf/Lobby](https://badges.gitter.im/hashicorp-serf/Lobby.svg)](https://gitter.im/hashicorp-serf/Lobby?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
 
-* Website: https://www.serf.io
+
+> [!NOTE]
+> Looking for serf.io? The Serf website was shut down on 10/02/2024. The docs
+previously served from serf.io can be found
+[https://github.com/hashicorp/serf/blob/master/docs/index.html.markdown](https://github.com/hashicorp/serf/blob/master/docs/index.html.markdown)
+
+
+* Website: https://github.com/hashicorp/serf
 * Chat: [Gitter](https://gitter.im/hashicorp-serf/Lobby)
 * Mailing list: [Google Groups](https://groups.google.com/group/serfdom/)
 
@@ -28,7 +35,7 @@ Here are some example use cases of Serf, though there are many others:
 
 ## Quick Start
 
-First, [download a pre-built Serf binary](https://www.serf.io/downloads.html)
+First, [download a pre-built Serf binary](https://releases.hashicorp.com/serf)
 for your operating system, [compile Serf yourself](#developing-serf), or install
 using `go get -u github.com/hashicorp/serf/cmd/serf`.
 
@@ -88,7 +95,7 @@ cluster of the node failure.
 
 Full, comprehensive documentation is viewable on the Serf website:
 
-https://www.serf.io/docs
+https://github.com/hashicorp/serf/tree/master/docs
 
 ## Developing Serf
 
@@ -119,3 +126,29 @@ Tests can be run by typing `make test`.
 
 If you make any changes to the code, run `make format` in order to automatically
 format the code according to Go [standards](https://golang.org/doc/effective_go.html#formatting).
+
+
+ ## Metrics Emission and Compatibility
+
+ This library can emit metrics using either `github.com/armon/go-metrics` or `github.com/hashicorp/go-metrics`. Choosing between the libraries is controlled via build tags. 
+
+ **Build Tags**
+ * `armonmetrics` - Using this tag will cause metrics to be routed to `armon/go-metrics`
+ * `hashicorpmetrics` - Using this tag will cause all metrics to be routed to `hashicorp/go-metrics`
+
+ If no build tag is specified, the default behavior is to use `armon/go-metrics`. 
+
+ **Deprecating `armon/go-metrics`**
+
+ Emitting metrics to `armon/go-metrics` is officially deprecated. Usage of `armon/go-metrics` will remain the default until mid-2025 with opt-in support continuing to the end of 2025.
+
+ **Migration**
+ To migrate an application currently using the older `armon/go-metrics` to instead use `hashicorp/go-metrics` the following should be done.
+
+ 1. Upgrade libraries using `armon/go-metrics` to consume `hashicorp/go-metrics/compat` instead. This should involve only changing import statements. All repositories in the `hashicorp` namespace
+ 2. Update an applications library dependencies to those that have the compatibility layer configured.
+ 3. Update the application to use `hashicorp/go-metrics` for configuring metrics export instead of `armon/go-metrics`
+    * Replace all application imports of `github.com/armon/go-metrics` with `github.com/hashicorp/go-metrics`
+    * Instrument your build system to build with the `hashicorpmetrics` tag.
+
+ Eventually once the default behavior changes to use `hashicorp/go-metrics` by default (mid-2025), you can drop the `hashicorpmetrics` build tag.

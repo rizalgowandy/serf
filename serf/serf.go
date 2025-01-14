@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package serf
 
 import (
@@ -16,8 +19,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/armon/go-metrics"
-	"github.com/hashicorp/go-msgpack/codec"
+	"github.com/hashicorp/go-metrics/compat"
+	"github.com/hashicorp/go-msgpack/v2/codec"
 	"github.com/hashicorp/memberlist"
 	"github.com/hashicorp/serf/coordinate"
 )
@@ -105,6 +108,10 @@ type Serf struct {
 	coordClient    *coordinate.Client
 	coordCache     map[string]*coordinate.Coordinate
 	coordCacheLock sync.RWMutex
+
+	// metricLabels is the slice of labels to put on all emitted metrics
+	metricLabels            []metrics.Label
+	msgpackUseNewTimeFormat bool
 }
 
 // SerfState is the state of the Serf instance.
@@ -264,12 +271,14 @@ func Create(conf *Config) (*Serf, error) {
 	}
 
 	serf := &Serf{
-		config:        conf,
-		logger:        logger,
-		members:       make(map[string]*memberState),
-		queryResponse: make(map[LamportTime]*QueryResponse),
-		shutdownCh:    make(chan struct{}),
-		state:         SerfAlive,
+		config:                  conf,
+		logger:                  logger,
+		members:                 make(map[string]*memberState),
+		queryResponse:           make(map[LamportTime]*QueryResponse),
+		shutdownCh:              make(chan struct{}),
+		state:                   SerfAlive,
+		metricLabels:            conf.MetricLabels,
+		msgpackUseNewTimeFormat: conf.MsgpackUseNewTimeFormat,
 	}
 	serf.eventJoinIgnore.Store(false)
 
@@ -313,7 +322,9 @@ func Create(conf *Config) (*Serf, error) {
 
 	// Set up network coordinate client.
 	if !conf.DisableCoordinates {
-		serf.coordClient, err = coordinate.NewClient(coordinate.DefaultConfig())
+		coordinateConfig := coordinate.DefaultConfig()
+		coordinateConfig.MetricLabels = serf.metricLabels
+		serf.coordClient, err = coordinate.NewClient(coordinateConfig)
 		if err != nil {
 			return nil, fmt.Errorf("Failed to create coordinate client: %v", err)
 		}
@@ -334,6 +345,7 @@ func Create(conf *Config) (*Serf, error) {
 		if err != nil {
 			return nil, fmt.Errorf("Failed to setup snapshot: %v", err)
 		}
+		snap.metricLabels = serf.metricLabels
 		serf.snapshotter = snap
 		conf.EventCh = eventCh
 		prev = snap.AliveNodes()
@@ -403,6 +415,8 @@ func Create(conf *Config) (*Serf, error) {
 		conf.MemberlistConfig.Merge = md
 		conf.MemberlistConfig.Alive = md
 	}
+
+	conf.MemberlistConfig.MetricLabels = conf.MetricLabels
 
 	// Create the underlying memberlist that will manage membership
 	// and failure detection for the Serf instance.
@@ -482,7 +496,7 @@ func (s *Serf) UserEvent(name string, payload []byte, coalesce bool) error {
 	}
 
 	// Start broadcasting the event
-	raw, err := encodeMessage(messageUserEventType, &msg)
+	raw, err := encodeMessage(messageUserEventType, &msg, s.msgpackUseNewTimeFormat)
 	if err != nil {
 		return err
 	}
@@ -562,7 +576,7 @@ func (s *Serf) Query(name string, payload []byte, params *QueryParam) (*QueryRes
 	}
 
 	// Encode the query
-	raw, err := encodeMessage(messageQueryType, &q)
+	raw, err := encodeMessage(messageQueryType, &q, s.msgpackUseNewTimeFormat)
 	if err != nil {
 		return nil, err
 	}
@@ -901,7 +915,7 @@ func (s *Serf) State() SerfState {
 // the broadcast. If a notify channel is given, this channel will be closed
 // when the broadcast is sent.
 func (s *Serf) broadcast(t messageType, msg interface{}, notify chan<- struct{}) error {
-	raw, err := encodeMessage(t, msg)
+	raw, err := encodeMessage(t, msg, s.msgpackUseNewTimeFormat)
 	if err != nil {
 		return err
 	}
@@ -953,7 +967,7 @@ func (s *Serf) handleNodeJoin(n *memberlist.Node) {
 		oldStatus = member.Status
 		deadTime := time.Now().Sub(member.leaveTime)
 		if oldStatus == StatusFailed && deadTime < s.config.FlapTimeout {
-			metrics.IncrCounter([]string{"serf", "member", "flap"}, 1)
+			metrics.IncrCounterWithLabels([]string{"serf", "member", "flap"}, 1, s.metricLabels)
 		}
 
 		member.Status = StatusAlive
@@ -980,7 +994,7 @@ func (s *Serf) handleNodeJoin(n *memberlist.Node) {
 	}
 
 	// Update some metrics
-	metrics.IncrCounter([]string{"serf", "member", "join"}, 1)
+	metrics.IncrCounterWithLabels([]string{"serf", "member", "join"}, 1, s.metricLabels)
 
 	// Send an event along
 	s.logger.Printf("[INFO] serf: EventMemberJoin: %s %s",
@@ -1030,7 +1044,7 @@ func (s *Serf) handleNodeLeave(n *memberlist.Node) {
 	}
 
 	// Update some metrics
-	metrics.IncrCounter([]string{"serf", "member", member.Status.String()}, 1)
+	metrics.IncrCounterWithLabels([]string{"serf", "member", member.Status.String()}, 1, s.metricLabels)
 
 	s.logger.Printf("[INFO] serf: %s: %s %s",
 		eventStr, member.Member.Name, member.Member.Addr)
@@ -1074,7 +1088,7 @@ func (s *Serf) handleNodeUpdate(n *memberlist.Node) {
 	member.DelegateCur = n.DCur
 
 	// Update some metrics
-	metrics.IncrCounter([]string{"serf", "member", "update"}, 1)
+	metrics.IncrCounterWithLabels([]string{"serf", "member", "update"}, 1, s.metricLabels)
 
 	// Send an event along
 	s.logger.Printf("[INFO] serf: EventMemberUpdate: %s", member.Member.Name)
@@ -1272,8 +1286,8 @@ func (s *Serf) handleUserEvent(eventMsg *messageUserEvent) bool {
 	seen.Events = append(seen.Events, userEvent)
 
 	// Update some metrics
-	metrics.IncrCounter([]string{"serf", "events"}, 1)
-	metrics.IncrCounter([]string{"serf", "events", eventMsg.Name}, 1)
+	metrics.IncrCounterWithLabels([]string{"serf", "events"}, 1, s.metricLabels)
+	metrics.IncrCounterWithLabels([]string{"serf", "events", eventMsg.Name}, 1, s.metricLabels)
 
 	if s.config.EventCh != nil {
 		s.config.EventCh <- UserEvent{
@@ -1331,8 +1345,8 @@ func (s *Serf) handleQuery(query *messageQuery) bool {
 	seen.QueryIDs = append(seen.QueryIDs, query.ID)
 
 	// Update some metrics
-	metrics.IncrCounter([]string{"serf", "queries"}, 1)
-	metrics.IncrCounter([]string{"serf", "queries", query.Name}, 1)
+	metrics.IncrCounterWithLabels([]string{"serf", "queries"}, 1, s.metricLabels)
+	metrics.IncrCounterWithLabels([]string{"serf", "queries", query.Name}, 1, s.metricLabels)
 
 	// Check if we should rebroadcast, this may be disabled by a flag
 	rebroadcast := true
@@ -1355,7 +1369,7 @@ func (s *Serf) handleQuery(query *messageQuery) bool {
 			From:  s.config.NodeName,
 			Flags: queryFlagAck,
 		}
-		raw, err := encodeMessage(messageQueryResponseType, &ack)
+		raw, err := encodeMessage(messageQueryResponseType, &ack, s.msgpackUseNewTimeFormat)
 		if err != nil {
 			s.logger.Printf("[ERR] serf: failed to format ack: %v", err)
 		} else {
@@ -1419,11 +1433,11 @@ func (s *Serf) handleQueryResponse(resp *messageQueryResponse) {
 	if resp.Ack() {
 		// Exit early if this is a duplicate ack
 		if _, ok := query.acks[resp.From]; ok {
-			metrics.IncrCounter([]string{"serf", "query_duplicate_acks"}, 1)
+			metrics.IncrCounterWithLabels([]string{"serf", "query_duplicate_acks"}, 1, s.metricLabels)
 			return
 		}
 
-		metrics.IncrCounter([]string{"serf", "query_acks"}, 1)
+		metrics.IncrCounterWithLabels([]string{"serf", "query_acks"}, 1, s.metricLabels)
 		err := query.sendAck(resp)
 		if err != nil {
 			s.logger.Printf("[WARN] %v", err)
@@ -1431,11 +1445,11 @@ func (s *Serf) handleQueryResponse(resp *messageQueryResponse) {
 	} else {
 		// Exit early if this is a duplicate response
 		if _, ok := query.responses[resp.From]; ok {
-			metrics.IncrCounter([]string{"serf", "query_duplicate_responses"}, 1)
+			metrics.IncrCounterWithLabels([]string{"serf", "query_duplicate_responses"}, 1, s.metricLabels)
 			return
 		}
 
-		metrics.IncrCounter([]string{"serf", "query_responses"}, 1)
+		metrics.IncrCounterWithLabels([]string{"serf", "query_responses"}, 1, s.metricLabels)
 		err := query.sendResponse(NodeResponse{From: resp.From, Payload: resp.Payload})
 		if err != nil {
 			s.logger.Printf("[WARN] %v", err)
@@ -1519,7 +1533,7 @@ func (s *Serf) resolveNodeConflict() {
 	}
 }
 
-//eraseNode takes a node completely out of the member list
+// eraseNode takes a node completely out of the member list
 func (s *Serf) eraseNode(m *memberState) {
 	// Delete from members
 	delete(s.members, m.Name)
@@ -1676,7 +1690,7 @@ func (s *Serf) checkQueueDepth(name string, queue *memberlist.TransmitLimitedQue
 		select {
 		case <-time.After(s.config.QueueCheckInterval):
 			numq := queue.NumQueued()
-			metrics.AddSample([]string{"serf", "queue", name}, float32(numq))
+			metrics.AddSampleWithLabels([]string{"serf", "queue", name}, float32(numq), s.metricLabels)
 			if numq >= s.config.QueueDepthWarning {
 				s.logger.Printf("[WARN] serf: %s queue depth: %d", name, numq)
 			}

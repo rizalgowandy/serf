@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package serf
 
 import (
@@ -18,7 +21,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hashicorp/go-msgpack/codec"
+	"github.com/hashicorp/go-msgpack/v2/codec"
 	"github.com/hashicorp/memberlist"
 	"github.com/hashicorp/serf/coordinate"
 	"github.com/hashicorp/serf/serf/internal/race"
@@ -976,6 +979,7 @@ func TestSerf_reconnect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
+	defer s2.Shutdown()
 
 	waitUntilNumNodes(t, 2, s1, s2)
 	// time.Sleep(s1Config.ReconnectInterval * 5)

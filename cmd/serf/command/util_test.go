@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package command
 
 import (
@@ -57,6 +60,6 @@ func testIPC(t *testing.T, ip net.IP, a *agent.Agent) (string, *agent.AgentIPC) 
 
 	lw := agent.NewLogWriter(512)
 	mult := io.MultiWriter(tw, lw)
-	ipc := agent.NewAgentIPC(a, "", l, mult, lw)
+	ipc := agent.NewAgentIPC(a, "", l, mult, lw, false)
 	return rpcAddr, ipc
 }

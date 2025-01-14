@@ -1,11 +1,14 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package serf
 
 import (
 	"bytes"
 	"fmt"
 
-	"github.com/armon/go-metrics"
-	"github.com/hashicorp/go-msgpack/codec"
+	"github.com/hashicorp/go-metrics/compat"
+	"github.com/hashicorp/go-msgpack/v2/codec"
 	"github.com/hashicorp/memberlist"
 )
 
@@ -30,7 +33,7 @@ func (d *delegate) NotifyMsg(buf []byte) {
 	if len(buf) == 0 {
 		return
 	}
-	metrics.AddSample([]string{"serf", "msgs", "received"}, float32(len(buf)))
+	metrics.AddSampleWithLabels([]string{"serf", "msgs", "received"}, float32(len(buf)), d.serf.metricLabels)
 
 	rebroadcast := false
 	rebroadcastQueue := d.serf.broadcasts
@@ -142,7 +145,7 @@ func (d *delegate) GetBroadcasts(overhead, limit int) [][]byte {
 	for _, msg := range msgs {
 		lm := len(msg)
 		bytesUsed += lm + overhead
-		metrics.AddSample([]string{"serf", "msgs", "sent"}, float32(lm))
+		metrics.AddSampleWithLabels([]string{"serf", "msgs", "sent"}, float32(lm), d.serf.metricLabels)
 	}
 
 	// Get any additional query broadcasts
@@ -151,7 +154,7 @@ func (d *delegate) GetBroadcasts(overhead, limit int) [][]byte {
 		for _, m := range queryMsgs {
 			lm := len(m)
 			bytesUsed += lm + overhead
-			metrics.AddSample([]string{"serf", "msgs", "sent"}, float32(lm))
+			metrics.AddSampleWithLabels([]string{"serf", "msgs", "sent"}, float32(lm), d.serf.metricLabels)
 		}
 		msgs = append(msgs, queryMsgs...)
 	}
@@ -162,7 +165,7 @@ func (d *delegate) GetBroadcasts(overhead, limit int) [][]byte {
 		for _, m := range eventMsgs {
 			lm := len(m)
 			bytesUsed += lm + overhead
-			metrics.AddSample([]string{"serf", "msgs", "sent"}, float32(lm))
+			metrics.AddSampleWithLabels([]string{"serf", "msgs", "sent"}, float32(lm), d.serf.keyManager.serf.metricLabels)
 		}
 		msgs = append(msgs, eventMsgs...)
 	}
@@ -197,7 +200,7 @@ func (d *delegate) LocalState(join bool) []byte {
 	}
 
 	// Encode the push pull state
-	buf, err := encodeMessage(messagePushPullType, &pp)
+	buf, err := encodeMessage(messagePushPullType, &pp, d.serf.msgpackUseNewTimeFormat)
 	if err != nil {
 		d.serf.logger.Printf("[ERR] serf: Failed to encode local state: %v", err)
 		return nil

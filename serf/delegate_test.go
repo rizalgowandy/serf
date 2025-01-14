@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package serf
 
 import (
@@ -184,7 +187,7 @@ func TestDelegate_MergeRemoteState(t *testing.T) {
 		QueryLTime: 100,
 	}
 
-	buf, err := encodeMessage(messagePushPullType, &pp)
+	buf, err := encodeMessage(messagePushPullType, &pp, c1.MsgpackUseNewTimeFormat)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}

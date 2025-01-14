@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package agent
 
 import (
@@ -37,7 +40,7 @@ func testRPCClientWithConfig(t *testing.T, ip net.IP, agentConf *Config,
 	mult := io.MultiWriter(tw, lw)
 
 	agent := testAgentWithConfig(t, ip, agentConf, serfConf, mult)
-	ipc := NewAgentIPC(agent, "", l, mult, lw)
+	ipc := NewAgentIPC(agent, "", l, mult, lw, serfConf.MsgpackUseNewTimeFormat)
 
 	rpcClient, err := client.NewRPCClient(l.Addr().String())
 	if err != nil {
